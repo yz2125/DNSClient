@@ -1,4 +1,6 @@
-import dns.resolver
+import argparse
+import socket
+import struct
 
 # Set the IP address of the local DNS server and a public DNS server
 #local_host_ip = '127.0.0.1'
@@ -9,10 +11,12 @@ import dns.resolver
 domainList  = ['example.com.','safebank.com.','google.com.','nyu.edu.','legitsite.com.']
 
 # Define a function to query the local DNS server for the IP address of a given domain name
-def query_local_dns_server(domain,question_type):
-    resolver = dns.resolver.Resolver()
-    resolver.nameservers = [local_host_ip]
-    answers = resolver.resolve(domain,question_type) # provide the domain and question_type
+def query_local_dns_server(type, name, server):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server_address = (server, 53)
+    #resolver = dns.resolver.Resolver()
+    #resolver.nameservers = [local_host_ip]
+    #answers = resolver.resolve(domain,question_type) # provide the domain and question_type
 
     ip_address = answers[0].to_text()
     return ip_address   
