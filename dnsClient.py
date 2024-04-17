@@ -45,6 +45,33 @@ def query_local_dns_server(type, name, server):
     message = header + question
     sent = sock.sendto(message, server_address)
     data, _ = sock.recvfrom(4096)
+    response_header = data[:12]
+    ID, FLAGS, QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT = struct.unpack('!HHHHHH', response_header) 
+    response_question = data[12:12+len(question)] 
+    assert response_question == question
+    response_answer = data[12+len(question):]
+    offset = 0
+    for _ in range(ANCOUNT):
+        # Parse the name
+        name_parts = []
+        while True:
+            length = response_answer[offset]
+            offset += 1
+            if length == 0:
+                break
+            elif length & 0xc0 == 0xc0:
+                # Pointer
+                pointer = struct.unpack('!H', response_answer[offset-1:offset+1])[0] & 0x3fff
+                offset += 1
+                name_parts.append(parse_name(data, pointer))
+                break
+            else: 
+                label = response_answer[offset:offset+length].decode('ascii')
+                offset += length
+                name_parts.append(label)
+        name = '.'.join(name_parts)
+
+
 
     #resolver = dns.resolver.Resolver()
     #resolver.nameservers = [local_host_ip]
