@@ -14,12 +14,44 @@ domainList  = ['example.com.','safebank.com.','google.com.','nyu.edu.','legitsit
 def query_local_dns_server(type, name, server):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server_address = (server, 53)
+
+    ID = 0x1234
+    QR = 0
+    OPCODE = 0
+    AA = 0
+    TC = 0
+    RD = 1
+    RA = 0
+    Z = 0
+    RCODE = 0
+    QDCOUNT = 1
+    ANCOUNT = 0
+    NSCOUNT = 0
+    ARCOUNT = 0
+
+    header = struct.pack('!HHHHHH', ID, QR << 15 | OPCODE << 11 | AA << 10 | TC << 9 | RD << 8| RA << 7 | Z << 4 | RCODE, QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT)
+    qname_parts = name.split(' ') 
+    qname_encoded_parts = [struct.pack('B', len(part)) + part.encode('ascii') for part in qname_parts] 
+    qname_encoded = b''.join(qname_encoded_parts) + b'\x00'
+
+    if type == 'A':
+        qtype = 1    
+    elif type == 'AAAA':
+        qtype = 28    
+    else:
+        raise ValueError('Invalid type')
+    qclass = 1 
+    question = qname_encoded + struct.pack('!HH', qtype, qclass)
+    message = header + question
+    sent = sock.sendto(message, server_address)
+    data, _ = sock.recvfrom(4096)
+
     #resolver = dns.resolver.Resolver()
     #resolver.nameservers = [local_host_ip]
     #answers = resolver.resolve(domain,question_type) # provide the domain and question_type
 
-    ip_address = answers[0].to_text()
-    return ip_address   
+    #ip_address = answers[0].to_text()
+    #return ip_address   
     
 # Define a function to query a public DNS server for the IP address of a given domain name
 def query_dns_server(domain,question_type):
