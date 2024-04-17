@@ -2,19 +2,17 @@ import argparse
 import socket
 import struct
 
-# Set the IP address of the local DNS server and a public DNS server
-#local_host_ip = '127.0.0.1'
-#real_name_server = '8.8.8.8' # Research public DNS servers to find a valid DNS server IP address to use
+        # Useful resources to solve this lab:
+        # 1. https://datatracker.ietf.org/doc/html/rfc1034
+        # 2. https://datatracker.ietf.org/doc/html/rfc1035
+        # 3. Kurose/Ross Book!
 
-
-# Create a list of domain names to query - use the same list from the DNS Server
-domainList  = ['example.com.','safebank.com.','google.com.','nyu.edu.','legitsite.com.']
-
-# Define a function to query the local DNS server for the IP address of a given domain name
-def query_local_dns_server(type, name, server):
+def dns_query(type, name, server):
+    # Create a UDP socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    server_address = (server, 53)
+    server_address = (server, 53) # Enter Port Number
 
+    # Create the DNS query
     ID = 0x1234
     QR = 0
     OPCODE = 0
@@ -29,27 +27,98 @@ def query_local_dns_server(type, name, server):
     NSCOUNT = 0
     ARCOUNT = 0
 
+        # The DNS header is a fixed-size (12 bytes), containing several fields with information about the query. These fields are packed into a binary string in network byte order 
+        # The values of these fields are combined using bitwise operations (<< for left shift and | for bitwise OR) to form a single 16-bit value, which is then packed into the binary string.
+        
+        # You are responsible for making sure each value is in the right location!
+            
+        # Each row in the diagram represents one byte (8 bits) of data, with the bit positions numbered along the top. 
+        # The fields in the DNS header are labeled and their sizes and positions are indicated by the boxes.
+
+        # DNS Header Format (12 bytes / 96 bits)
+        #
+        # 0	 1	2  3  4  5	6  7  8  9 10 11 12 13 14 15
+        # +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+        # |                      MessageID                 |
+        # +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+        # |QR|   Opcode    |AA|TC|RD|RA| Reserved | RCODE  |
+        # +--+--+--+--+--+--+--+--+--+--+--+--+--+--+------+ 
+        # |                    QDCount                     |
+        # +------+-----+-----+-----+-----+-----+-----+-----+
+        # |                    ANCount                     |
+        # +------+-----+-----+-----+-----+-----+-----+-----+
+        # |                    NSCount                     |
+        # +------+-----+-----+-----+-----+-----+-----+-----+
+        # |                    ARCount                     |
+        # +------+-----+-----+-----+-----+-----+-----+-----+
+
+
+        # Message ID: 16 bits
+        # QR (Query/Response): 1 bit
+        # Opcode: 4 bits
+        # AA (Authoritative Answer): 1 bit
+        # TC (Truncated): 1 bit
+        # RD (Recursion Desired): 1 bit
+        # RA (Recursion Available): 1 bit
+        # Z: 3 bits
+        # Rcode (Response Code): 4 bits
+        # QDCount (Question Count): 16 bits
+        # ANCount (Answer Count): 16 bits
+        # NSCount (Authority Count): 16 bits
+        # ARCount (Additional Count): 16 bits
+        
+        # Example: The QR field is located in the second byte of the DNS header, with its most significant bit being the leftmost bit of this byte. Since each byte contains 8 bits, shifting the value of the QR field left by 15 bits moves it to the correct position in the 16-bit value that represents the combination of several fields in the DNS header.
+
     header = struct.pack('!HHHHHH', ID, QR << 15 | OPCODE << 11 | AA << 10 | TC << 9 | RD << 8| RA << 7 | Z << 4 | RCODE, QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT)
-    qname_parts = name.split(' ') 
-    qname_encoded_parts = [struct.pack('B', len(part)) + part.encode('ascii') for part in qname_parts] 
-    qname_encoded = b''.join(qname_encoded_parts) + b'\x00'
+
+    # Encode the QNAME
+    
+        # To do so we need to split the incoming string into parts
+        
+        # For example www.nyu.edu would become:
+        # 1. www (length of 3)
+        # 2. nyu (length of 3)
+        # 3. edu (length of 3)
+        
+    qname_parts = name.split(' ') # How can we easily split the string?
+    qname_encoded_parts = [struct.pack('B', len(part)) + part.encode('ascii') for part in qname_parts] # Make sure it's encoded as a sequence of the right character encoding type (lowercase)
+    qname_encoded = b''.join(qname_encoded_parts) + b'\x00' #enter the closing byte value to signify the end of the domain string (two digits)
+
+    # Encode the QTYPE and QCLASS
 
     if type == 'A':
-        qtype = 1    
+        qtype = 1    # Lookup the Resource Record value
     elif type == 'AAAA':
-        qtype = 28    
+        qtype = 28     # Lookup the Resource Record value
     else:
         raise ValueError('Invalid type')
-    qclass = 1 
+    
+
+    qclass = 1     # Lookup the Resource Record class being requested
+
+        # This is the query we are asking the DNS Server
     question = qname_encoded + struct.pack('!HH', qtype, qclass)
+
+    # Send the query to the server, remember we must always include our header alongside the question!
     message = header + question
     sent = sock.sendto(message, server_address)
-    data, _ = sock.recvfrom(4096)
-    response_header = data[:12]
-    ID, FLAGS, QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT = struct.unpack('!HHHHHH', response_header) 
-    response_question = data[12:12+len(question)] 
+
+    # Receive the response from the server
+    data, _ = sock.recvfrom(4096) # This is the buffer size we have selected, 4096 Bytes is the maximum amount of data to be received at once.
+    
+        # A larger buffer size would allow more data to be received at once, while a smaller buffer size would limit the amount of data that can be received at once. 
+        # It is a good idea to choose a buffer size that is large enough to accommodate the largest expected DNS response, but not so large that it wastes memory.
+    
+    # Parse the response header
+    response_header = data[:12] # What is the size of the DNS response header in bytes?
+    ID, FLAGS, QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT = struct.unpack('!HHHHHH', response_header) # We are unpacking the binary data of the response header into individual values representing the fields of the DNS header.
+    
+    # Parse the response question section (same as query)
+    response_question = data[12:12+len(question)] # The data variable starts immediately after the header section, so what is it's index? Note the two '??' '??' will be the same value as we start at a specific index and then go for the entire length of the binary data received.
     assert response_question == question
-    response_answer = data[12+len(question):]
+
+    # Parse the response answer section
+    response_answer = data[12+len(question):] # We would be looking at the same index position as before (after the header)
     offset = 0
     for _ in range(ANCOUNT):
         # Parse the name
@@ -63,73 +132,60 @@ def query_local_dns_server(type, name, server):
                 # Pointer
                 pointer = struct.unpack('!H', response_answer[offset-1:offset+1])[0] & 0x3fff
                 offset += 1
-                name_parts.append(parse_name(data, pointer))
+                name_parts.append(parse_name(data, pointer)) # For those curious, parse_name() parses the rest of the domain name, and we append the result to the name_parts list.
                 break
-            else: 
+            else:
+                # Label
                 label = response_answer[offset:offset+length].decode('ascii')
                 offset += length
                 name_parts.append(label)
         name = '.'.join(name_parts)
 
-
-
-    #resolver = dns.resolver.Resolver()
-    #resolver.nameservers = [local_host_ip]
-    #answers = resolver.resolve(domain,question_type) # provide the domain and question_type
-
-    #ip_address = answers[0].to_text()
-    #return ip_address   
-    
-# Define a function to query a public DNS server for the IP address of a given domain name
-def query_dns_server(domain,question_type):
-    resolver = dns.resolver.Resolver()
-    resolver.nameservers = [real_name_server]
-    answers = resolver.resolve(domain, question_type) # provide the domain and question_type
-
-    ip_address = answers[0].to_text()
-    return ip_address
-    
-# Define a function to compare the results from the local and public DNS servers for each domain name in the list
-def compare_dns_servers(domainList,question_type):
-    for domain_name in domainList:
-        local_ip_address = query_local_dns_server(domain_name,question_type)
-        public_ip_address = query_dns_server(domain_name,question_type)
-        if local_ip_address != public_ip_address:
-            return False
-    return True    
-    
-# Define a function to print the results from querying both the local and public DNS servers for each domain name in the domainList
-def local_external_DNS_output(question_type):    
-    print("Local DNS Server")
-    for domain_name in domainList:
-        ip_address = query_local_dns_server(domain_name,question_type)
-        print(f"The IP address of {domain_name} is {ip_address}")
-
-
-    print("\nPublic DNS Server")
-
-    for domain_name in domainList:
-        ip_address = query_dns_server(domain_name,question_type)
-        print(f"The IP address of {domain_name} is {ip_address}")
+        # Parse the type, class, TTL, and RDLENGTH
+        type, cls, ttl, rdlength = struct.unpack('!HHIH', response_answer[offset:offset+10]) # What is the offset value in bytes? Remember 'H' represent 2 bytes, and 'I' represents one byte, we declared '!HHIH'.
         
-        
-def exfiltrate_info(domain,question_type): # testing method for part 2
-    data = query_local_dns_server(domain,question_type)
-    return data 
+        offset += 10 # Same value as just calculated
 
-        
+        # Parse the RDATA
+        rdata = response_answer[offset:offset+rdlength]
+        offset += rdlength
+
+        if type == 1: # Lookup Type value
+            # A record (IPv4 address)
+            ipv4 = socket.inet_ntop(socket.AF_INET, rdata)
+            print(f'{name} has IPv4 address {ipv4}')
+            return ipv4
+        elif type == 28: # Lookup Type value
+            # AAAA record (IPv6 address)
+            ipv6 = socket.inet_ntop(socket.AF_INET6, rdata)
+            print(f'{name} has IPv6 address {ipv6}')
+            return ipv6                
+
+def parse_name(data, offset):
+    name_parts = []
+    while True:
+        length = data[offset]
+        offset += 1
+        if length == 0:
+            break
+        elif length & 0xc0 == 0xc0:
+            # Pointer
+            pointer = struct.unpack('!H', data[offset-1:offset+1])[0] & 0x3fff
+            offset += 1
+            name_parts.append(parse_name(data, pointer))
+            break
+        else:
+            # Label
+            label = data[offset:offset+length].decode('ascii') # HINT
+            offset += length
+            name_parts.append(label)
+    return '.'.join(name_parts)
+
 if __name__ == '__main__':
-    
-    # Set the type of DNS query to be performed
-    question_type = 'A'
+    parser = argparse.ArgumentParser(description='Send a DNS query and parse the reply.')
+    parser.add_argument('--type', choices=['A', 'AAAA'], required=True, help='the type of address requested')
+    parser.add_argument('--name', required=True, help='the host name being queried')
+    parser.add_argument('--server', required=True, help='the IP address of the DNS server to query')
+    args = parser.parse_args()
 
-
-    # Call the function to print the results from querying both DNS servers
-    #local_external_DNS_output(question_type)
-    
-    # Call the function to compare the results from both DNS servers and print the result
-    result = compare_dns_servers(domainList,question_type)
-    result = query_local_dns_server('nyu.edu.',question_type)
-    print(result)
-    
-    #print(exfiltrate_info())
+    result = dns_query(args.type, args.name, args.server)
